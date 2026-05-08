@@ -134,3 +134,19 @@ config SCHED_CORE
 	  be no measurable impact on performance.
 
 
+
+config HMBIRD_SCHED
+	bool "hmbird Scheduling Class(base on ext scheduler)"
+	depends on BPF_SYSCALL && BPF_JIT
+	help
+	  This option enables a new scheduler class sched_ext (SCX), which
+	  allows scheduling policies to be implemented as BPF programs to
+	  facilitate experimentation and exploration of new scheduling
+	  policies.
+
+config DYNAMIC_WALT_SUPPORT
+	bool "Dynamic WALT Support for Extensible Scheduling Class"
+	depends on HMBIRD_SCHED
+	default n
+	help
+	  Enable dynamic WALT support for Extensible Scheduling Class.
