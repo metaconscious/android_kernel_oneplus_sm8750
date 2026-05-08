@@ -3477,40 +3477,6 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 	p->prio = prio;
 }
 
-struct hmbird_sched_change_guard
-hmbird_sched_change_guard_init(struct rq *rq, struct task_struct *p, int flags)
-{
-	struct hmbird_sched_change_guard cg = {
-		.p = p,
-		.rq = rq,
-		.queued = task_on_rq_queued(p),
-		.running = task_current(rq, p),
-		.done = false,
-	};
-
-	/*
-	 * SCHED_CHANGE_BLOCK() is used while rq lock is held to make temporary
-	 * scheduler-class transitions atomic from rq state perspective.
-	 */
-	if (cg.queued)
-		dequeue_task(rq, p, flags);
-	if (cg.running)
-		put_prev_task(rq, p);
-
-	return cg;
-}
-
-void hmbird_sched_change_guard_fini(struct hmbird_sched_change_guard *cg,
-				    int flags)
-{
-	if (cg->queued)
-		enqueue_task(cg->rq, cg->p, flags);
-	if (cg->running)
-		set_next_task(cg->rq, cg->p);
-
-	cg->done = true;
-}
-
 /*
  * Heartbeat, avoid humbird keep running while APP already exit.
  * Check whether APP send alive-signal periodly.

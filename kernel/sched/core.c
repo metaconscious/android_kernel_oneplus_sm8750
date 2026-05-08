@@ -2214,6 +2214,42 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	trace_android_rvh_after_dequeue_task(rq, p, flags);
 }
 
+#ifdef CONFIG_HMBIRD_SCHED
+struct hmbird_sched_change_guard
+hmbird_sched_change_guard_init(struct rq *rq, struct task_struct *p, int flags)
+{
+	struct hmbird_sched_change_guard cg = {
+		.p = p,
+		.rq = rq,
+		.queued = task_on_rq_queued(p),
+		.running = task_current(rq, p),
+		.done = false,
+	};
+
+	/*
+	 * SCHED_CHANGE_BLOCK() assumes rq lock is already held by caller.
+	 * Keep dequeue/enqueue symmetric around the scheduling-class update.
+	 */
+	if (cg.queued)
+		dequeue_task(rq, p, flags);
+	if (cg.running)
+		put_prev_task(rq, p);
+
+	return cg;
+}
+
+void hmbird_sched_change_guard_fini(struct hmbird_sched_change_guard *cg,
+				    int flags)
+{
+	if (cg->queued)
+		enqueue_task(cg->rq, cg->p, flags);
+	if (cg->running)
+		set_next_task(cg->rq, cg->p);
+
+	cg->done = true;
+}
+#endif
+
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (task_on_rq_migrating(p))
