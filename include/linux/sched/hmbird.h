@@ -51,6 +51,9 @@
 #define TOP_TASK_BITS           (8)
 #include <linux/llist.h>
 
+struct rq;
+struct task_struct;
+
 extern atomic_t non_hmbird_task;
 extern atomic_t __hmbird_ops_enabled;
 #define hmbird_enabled()           atomic_read(&__hmbird_ops_enabled)
