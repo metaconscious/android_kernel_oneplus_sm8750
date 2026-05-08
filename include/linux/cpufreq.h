@@ -47,10 +47,6 @@ enum cpufreq_table_sorting {
 	CPUFREQ_TABLE_SORTED_DESCENDING
 };
 
-ssize_t store_scaling_governor(struct cpufreq_policy *policy,
-                                        const char *buf, size_t count);
-ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf);
-
 struct cpufreq_cpuinfo {
 	unsigned int		max_freq;
 	unsigned int		min_freq;
@@ -205,6 +201,9 @@ struct cpufreq_freqs {
 struct cpufreq_policy *cpufreq_cpu_get_raw(unsigned int cpu);
 struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu);
 void cpufreq_cpu_put(struct cpufreq_policy *policy);
+ssize_t store_scaling_governor(struct cpufreq_policy *policy,
+			       const char *buf, size_t count);
+ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf);
 #else
 static inline struct cpufreq_policy *cpufreq_cpu_get_raw(unsigned int cpu)
 {
@@ -215,6 +214,16 @@ static inline struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
 	return NULL;
 }
 static inline void cpufreq_cpu_put(struct cpufreq_policy *policy) { }
+static inline ssize_t store_scaling_governor(struct cpufreq_policy *policy,
+					     const char *buf, size_t count)
+{
+	return -EOPNOTSUPP;
+}
+static inline ssize_t show_scaling_governor(struct cpufreq_policy *policy,
+					    char *buf)
+{
+	return -EOPNOTSUPP;
+}
 #endif
 
 static inline bool policy_is_inactive(struct cpufreq_policy *policy)

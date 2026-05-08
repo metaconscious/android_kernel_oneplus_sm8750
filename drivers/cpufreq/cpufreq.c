@@ -831,12 +831,12 @@ static ssize_t store_##file_name					\
 static ssize_t store_scaling_min_freq_limit
 (struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	unsigned long val;
+	unsigned int val;
 	int ret;
 
-	ret = sscanf(buf, "%u", &val);
-	if (ret != 1)
-		return -EINVAL;
+	ret = kstrtouint(buf, 0, &val);
+	if (ret)
+		return ret;
 
 	store_cpumask_min_limit(policy->related_cpus, val);
 	return count;
@@ -862,7 +862,7 @@ static ssize_t show_cpuinfo_cur_freq(struct cpufreq_policy *policy,
 /*
  * show_scaling_governor - show the current policy for the specified CPU
  */
-static ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf)
+ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf)
 {
 	if (policy->policy == CPUFREQ_POLICY_POWERSAVE)
 		return sprintf(buf, "powersave\n");
@@ -877,8 +877,8 @@ static ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf)
 /*
  * store_scaling_governor - store policy for the specified CPU
  */
-static ssize_t store_scaling_governor(struct cpufreq_policy *policy,
-					const char *buf, size_t count)
+ssize_t store_scaling_governor(struct cpufreq_policy *policy,
+			       const char *buf, size_t count)
 {
 	char str_governor[16];
 	int ret;

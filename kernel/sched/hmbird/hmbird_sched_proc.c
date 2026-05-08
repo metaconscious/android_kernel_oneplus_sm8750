@@ -205,10 +205,14 @@ static ssize_t save_gov_str(struct file *file, const char __user *buf,
 
 	for_each_possible_cpu(cpu) {
 		policy = cpufreq_cpu_get(cpu);
-		if (!policy || (cpu != policy->cpu))
+		if (!policy)
 			continue;
+		if (cpu != policy->cpu)
+			goto put;
 		WARN_ON(show_scaling_governor(policy, saved_gov[cpu]) <= 0);
 		hmbird_info_systrace("<gov_restore>:save origin gov : %s\n", saved_gov[cpu]);
+put:
+		cpufreq_cpu_put(policy);
 	}
 	return count;
 }
