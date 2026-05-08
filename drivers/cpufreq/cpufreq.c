@@ -831,12 +831,12 @@ static ssize_t store_##file_name					\
 static ssize_t store_scaling_min_freq_limit
 (struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	unsigned long val;
+	unsigned int val;
 	int ret;
 
-	ret = sscanf(buf, "%u", &val);
-	if (ret != 1)
-		return -EINVAL;
+	ret = kstrtouint(buf, 0, &val);
+	if (ret)
+		return ret;
 
 	store_cpumask_min_limit(policy->related_cpus, val);
 	return count;
