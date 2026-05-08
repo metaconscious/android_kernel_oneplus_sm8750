@@ -2280,7 +2280,6 @@ static int effective_prio(struct task_struct *p)
 		return p->normal_prio;
 	return p->prio;
 }
-#endif
 
 /**
  * task_curr - is this task currently executing on a CPU?
