@@ -101,6 +101,10 @@
 #include <linux/ksm.h>
 #include <linux/cpufreq_times.h>
 #include <linux/dma-buf.h>
+#if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
+#include <linux/susfs_def.h>
+#endif
+
 #include <trace/events/oom.h>
 #include <trace/hooks/sched.h>
 #include "internal.h"
@@ -932,6 +936,23 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 
 	while (count > 0) {
 		size_t this_len = min_t(size_t, count, PAGE_SIZE);
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+		struct vm_area_struct *vma;
+		vma = find_vma(mm, addr);
+		if (vma && vma->vm_file) {
+			struct inode *inode = file_inode(vma->vm_file);
+			if (SUSFS_IS_INODE_SUS_MAP(inode)) {
+				if (write) {
+					copied = -EFAULT;
+				} else {
+					copied = -EIO;
+				}
+				*ppos = addr;
+				mmput(mm);
+				goto free;
+			}
+		}
+#endif
 
 		if (write && copy_from_user(page, buf, this_len)) {
 			copied = -EFAULT;
@@ -1835,6 +1856,10 @@ out:
 	return ERR_PTR(error);
 }
 
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+extern int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
+#endif
+
 static int do_proc_readlink(const struct path *path, char __user *buffer, int buflen)
 {
 	char *tmp = kmalloc(PATH_MAX, GFP_KERNEL);
@@ -1843,6 +1868,18 @@ static int do_proc_readlink(const struct path *path, char __user *buffer, int bu
 
 	if (!tmp)
 		return -ENOMEM;
+
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	if (SUSFS_IS_INODE_OPEN_REDIRECT(path->dentry->d_inode)) {
+		if (!susfs_open_redirect_spoof_do_proc_readlink(path->dentry->d_inode, tmp, buflen)) {
+			len = strlen(tmp);
+			if (copy_to_user(buffer, tmp, len))
+				len = -EFAULT;
+			kfree(tmp);
+			return len;
+		}
+	}
+#endif
 
 	pathname = d_path(path, tmp, PATH_MAX);
 	len = PTR_ERR(pathname);
@@ -2423,6 +2460,9 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 	struct map_files_info *p;
 	int ret;
 	struct vma_iterator vmi;
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+	struct inode *inode;
+#endif
 
 	genradix_init(&fa);
 
@@ -2466,6 +2506,11 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 	for_each_vma(vmi, vma) {
 		if (!vma->vm_file)
 			continue;
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+		inode = file_inode(vma->vm_file);
+		if (SUSFS_IS_INODE_SUS_MAP(inode))
+			continue;
+#endif
 		if (++pos <= ctx->pos)
 			continue;
 
@@ -3306,10 +3351,24 @@ static int proc_stack_depth(struct seq_file *m, struct pid_namespace *ns,
 #endif /* CONFIG_STACKLEAK_METRICS */
 
 #ifdef CONFIG_DMA_SHARED_BUFFER
+
+static struct task_dma_buf_info *get_task_dmabuf_info(struct task_struct *task)
+{
+	struct task_dma_buf_info *dmabuf_info;
+
+	task_lock(task);
+	dmabuf_info = task->dmabuf_info;
+	if (dmabuf_info)
+		get_dmabuf_info(dmabuf_info);
+	task_unlock(task);
+
+	return dmabuf_info;
+}
+
 static int proc_dmabuf_rss_show(struct seq_file *m, struct pid_namespace *ns,
 		     struct pid *pid, struct task_struct *task)
 {
-	struct task_dma_buf_info *dmabuf_info = task->dmabuf_info;
+	struct task_dma_buf_info *dmabuf_info = get_task_dmabuf_info(task);
 
 	if (dmabuf_info) {
 		unsigned long rss;
@@ -3317,6 +3376,7 @@ static int proc_dmabuf_rss_show(struct seq_file *m, struct pid_namespace *ns,
 		spin_lock(&dmabuf_info->lock);
 		rss = dmabuf_info->rss;
 		spin_unlock(&dmabuf_info->lock);
+		put_dmabuf_info(dmabuf_info);
 		seq_printf(m, "%lu\n", rss);
 	}
 
@@ -3327,18 +3387,22 @@ static int proc_dmabuf_rss_hwm_show(struct seq_file *m, void *v)
 {
 	struct inode *inode = m->private;
 	struct task_struct *task;
+	struct task_dma_buf_info *dmabuf_info;
 	int ret = 0;
 
 	task = get_proc_task(inode);
 	if (!task)
 		return -ESRCH;
 
-	if (task->dmabuf_info) {
+	dmabuf_info = get_task_dmabuf_info(task);
+
+	if (dmabuf_info) {
 		unsigned long rss_hwm;
 
-		spin_lock(&task->dmabuf_info->lock);
-		rss_hwm = task->dmabuf_info->rss_hwm;
-		spin_unlock(&task->dmabuf_info->lock);
+		spin_lock(&dmabuf_info->lock);
+		rss_hwm = dmabuf_info->rss_hwm;
+		spin_unlock(&dmabuf_info->lock);
+		put_dmabuf_info(dmabuf_info);
 		seq_printf(m, "%lu\n", rss_hwm);
 	}
 
@@ -3358,6 +3422,7 @@ proc_dmabuf_rss_hwm_write(struct file *file, const char __user *buf,
 {
 	struct inode *inode = file_inode(file);
 	struct task_struct *task;
+	struct task_dma_buf_info *dmabuf_info;
 	unsigned long long val;
 	int ret;
 
@@ -3372,12 +3437,15 @@ proc_dmabuf_rss_hwm_write(struct file *file, const char __user *buf,
 	if (!task)
 		return -ESRCH;
 
-	if (!task->dmabuf_info) {
+	dmabuf_info = get_task_dmabuf_info(task);
+
+	if (!dmabuf_info) {
 		ret = -ENOENT;
 	} else {
-		spin_lock(&task->dmabuf_info->lock);
-		task->dmabuf_info->rss_hwm = task->dmabuf_info->rss;
-		spin_unlock(&task->dmabuf_info->lock);
+		spin_lock(&dmabuf_info->lock);
+		dmabuf_info->rss_hwm = dmabuf_info->rss;
+		spin_unlock(&dmabuf_info->lock);
+		put_dmabuf_info(dmabuf_info);
 	}
 
 	put_task_struct(task);
@@ -3396,13 +3464,14 @@ static const struct file_operations proc_dmabuf_rss_hwm_operations = {
 static int proc_dmabuf_pss_show(struct seq_file *m, struct pid_namespace *ns,
 		     struct pid *pid, struct task_struct *task)
 {
+	struct task_dma_buf_info *dmabuf_info = get_task_dmabuf_info(task);
 	struct task_dma_buf_record *rec;
 
-	if (task->dmabuf_info) {
+	if (dmabuf_info) {
 		unsigned long pss = 0;
 
-		spin_lock(&task->dmabuf_info->lock);
-		list_for_each_entry(rec, &task->dmabuf_info->dmabufs, node) {
+		spin_lock(&dmabuf_info->lock);
+		list_for_each_entry(rec, &dmabuf_info->dmabufs, node) {
 			s64 refs = atomic64_read(&rec->dmabuf->nr_task_refs);
 
 			if (refs <= 0) {
@@ -3412,7 +3481,8 @@ static int proc_dmabuf_pss_show(struct seq_file *m, struct pid_namespace *ns,
 
 			pss += rec->dmabuf->size / (size_t)refs;
 		}
-		spin_unlock(&task->dmabuf_info->lock);
+		spin_unlock(&dmabuf_info->lock);
+		put_dmabuf_info(dmabuf_info);
 		seq_printf(m, "%lu\n", pss);
 	}
 
